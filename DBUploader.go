@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -14,17 +13,18 @@ var db *sql.DB
 func main() {
 
 	cfg := mysql.Config{
-		User: os.Getenv("root"),
-		Passwd: os.Getenv("1138"),
+		User: "root",
+		Passwd: "1138",
 		Net: "tcp",
-		Addr: "127.0.0.1:0",
+		Addr: "127.0.0.1:3306",
 		DBName: "1138scapp",
+		AllowNativePasswords: true,
 	}
 
 	//database handle
 	var err error
 	
-	db, err = sql.Open("mySql", cfg.FormatDSN())
+	db, err = sql.Open("mysql", cfg.FormatDSN())
 
 	if err != nil {
 		log.Fatal(err)
@@ -37,3 +37,7 @@ func main() {
 
 	fmt.Println("Database connected")
 }
+
+//googlesheets -> credit card down but no charge
+//Use free cloud DB with limited rows
+//Server in tema room accessed using VPN

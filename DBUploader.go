@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/go-sql-driver/mysql"
 	"golang.org/x/oauth2"
@@ -46,15 +47,19 @@ func main() {
 	//Important edit info here
 	spreadsheetId := "1kMpYNbYvbXHQywKSepXi9q8w7wwz8GP90rn9bIxd8Ck"
 	writeRange := "Sheet1!A1:A1"
-	tableName := "team"
+
+	//temporary For DEBUGGING purposes only - not final product -
+	var tableName string
+	fmt.Scan(&tableName)
 	
 
-	values, err := getDataFromDBTable(db, tableName)
+	table, err := getDataFromDBTable(db, tableName)
+	
 	if err != nil {
 		fmt.Println("Issue with retrieving table: ", tableName, "%q: %v", err)
 	}
 
-	WriteSheetAdd(spreadsheetId, writeRange, values, srv)
+	WriteSheetAdd(spreadsheetId, writeRange, table, srv)
 
 
 	//use Values.Append for adding new data and Values.Update to replace data
@@ -133,12 +138,14 @@ func connectToDb() *sql.DB {
 
 func getDataFromDBTable(db *sql.DB, tableName string) ([][]interface{}, error) {
 	
-	var table [][]interface{}
+	
 
 	rows, err := db.Query("Select * From " + tableName)
 	if err != nil {
-		return nil, fmt.Errorf("Table: ", tableName, "%q: %v", err)
+		return nil, fmt.Errorf("table %q: %v ", tableName, err)
 	}
+
+	var table [][]interface{}
 
 	defer rows.Close()
 
@@ -147,23 +154,66 @@ func getDataFromDBTable(db *sql.DB, tableName string) ([][]interface{}, error) {
 	//and appends to 2 dimensional matrix after scanning
 	for rows.Next() {
 		
-		columnCount, _ := rows.Columns()
-		row := make([]interface{}, len(columnCount))
+		columns, _ := rows.Columns()
+		//this interface is a row
+		row := make([]interface{},len(columns))
+		rowPointers := make([]interface{}, len(columns))
 
-		//have another interface of pointers to values in "row"
-		//ensures that row can pretty much be passed without knowing columns
-		//and being able to be passed as 1 arguement
-		rowPointers := make([]interface{}, len(columnCount))
-
-		for i := range row {
-			rowPointers[i] = &row[i]
+		for i := range columns {
+			rowPointers[i] = &row[i] //allocate pointers to store values
 		}
 
 		err := rows.Scan(rowPointers...);
-		table = append(table, row)
+
 		if err != nil {
 			return nil, fmt.Errorf("table %q: %v", tableName, err)
 		}
+
+		//Loop derefrences pointers in values and applies them to row
+		//The switch statement ensures that all types are formatted correctly
+		for i, col := range rowPointers {
+			value := *(col.(*interface{}))
+
+			if value == nil {
+				row[i] = ""
+			} else {
+				switch value := value.(type) {
+				case []byte: 
+					strValue := string(value)
+					//checks if byte array as a string represents a number -> will convert if so
+					if intValue, err := strconv.ParseInt(strValue, 10, 64); err == nil {
+						row[i] = intValue
+						fmt.Println("Byte Array found to be Integer: ", row[i])
+					} else if floatValue, err := strconv.ParseFloat(strValue, 64); err == nil {
+						row[i] = floatValue
+						fmt.Println("Byte Array found to be Float: ", row[i])
+					} else {
+						row[i] = strValue
+						fmt.Println("Byte Array found to be String: ", row[i])
+					}
+
+					row[i] = string(value)
+					
+				case int64:
+					row[i] = strconv.FormatInt(value, 10)
+					fmt.Println("Integers found: ", row[i])
+				case float64:
+					row[i] = strconv.FormatFloat(value, 'f', -1, 64)
+					fmt.Println("Floats found: ", row[i])
+				case bool:
+					row[i] = strconv.FormatBool(value)
+					fmt.Println("Booleans found: ", row[i])
+				default:
+					row[i] = fmt.Sprintf("%v", value)
+					fmt.Println("Something else found: ", row[i])
+				}
+			}
+
+			
+		}
+	
+
+		table = append(table, row)
 	}
 
 	err = rows.Err()
@@ -174,6 +224,20 @@ func getDataFromDBTable(db *sql.DB, tableName string) ([][]interface{}, error) {
 	fmt.Println("Database data succesfully retrieved from: " + tableName)
 	fmt.Println(table)
 	return table, nil
+}
+
+func String2dToInterface2d(arr [][]string) [][]interface{} {
+
+	intfc := make([][]interface{}, len(arr)) 
+
+	for i, row := range arr {
+		intfc[i] = make([]interface{}, len(row))
+		for j, val := range row {
+			intfc[i][j] = val
+		}
+	}
+
+	return intfc
 }
 
 

@@ -9,7 +9,7 @@ This go script written by Brighton Gannaway from FRC team 1138:
 
 It is intended to be used on the team's local databases and is not for public use.
 
-#How To Run
+# How To Run
 
 1. Have a mySQL database to work off of
 2. Download the `.exe` file attached names`UploadDB.exe`

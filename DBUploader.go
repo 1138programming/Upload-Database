@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"golang.org/x/oauth2"
@@ -108,68 +109,16 @@ func main() {
 	}
 	//----------------------//
 
-	//----- Getting the last IDs of data present in the sheet ----//
+	//security messure cause API stuff
 
-	//configure ranges
-	var ranges []string
 
-	for _, name := range GoogleSheet.Sheets {
-		ranges = append(ranges, name + "!2:9999")
-	}
-
-	//configure last Ids of each sheet
-	lastIds := getLastKeyFromSheets(
-		batchRead(srv, GoogleSheet.SpreadsheetId, ranges),
-		GoogleSheet.Sheets,
-	)
-
-	var GoogleSheetRequest []*sheets.ValueRange
-
-	//scans all tables from Database and adds them to a list of ValueRange pointers
-	//This is done to batch write and only use 1 API call fro everything
-	for _, name := range DB_1138scapp.TableNames {
-
-		var err error
-		IdOffset, valueExists := lastIds[name]
-
-		if !slices.Contains(GoogleSheet.Sheets, name) {
-			continue
-		}
-	
+	//Loop every [15] seconds ti upload database
+	for {
 		
-		//checks if the offset retrieved is an integer
-		//if so it will convert it to a string to be used as the offset
-		//else it will simply set the offset to be 0
-		//the 0 case will make it so that the sheet returns to normal after everything 
-		var table [][]interface{}
-
-		if valueExists {
-			fmt.Println("Getting data from database: ", name, " with offset: ", IdOffset)
-			table, err = getDataFromDBTable(db, name, convertInterfaceOfIdToIntString(IdOffset))
-		} else {
-			fmt.Println("Error finding ID value. Putting in '0' as default")
-			table, err = getDataFromDBTable(db, name, 0)
-		}
-
-		if err != nil {
-			fmt.Println("Issue with retrieving table: ", name, "%q: %v", err)
-			continue
-		}
-
-		writeRange := name + "!2:9999"
-
-		GoogleSheetRequest = append(GoogleSheetRequest, &sheets.ValueRange{
-			Range: writeRange,
-			Values: table,
-		})
+		fmt.Println("Uploading Database: ", time.Now())
+		uploadDB(srv, db, GoogleSheet, DB_1138scapp)
+		time.Sleep(15 * time.Second) //loop every 15 seconds
 	}
-
-	batchWrite(srv, GoogleSheet.SpreadsheetId, GoogleSheetRequest)
-	
-
-
-
-	//use Values.Append for adding new data and Values.Update to replace data
 
 }
 
@@ -253,12 +202,9 @@ func getLastKeyFromSheets(sheetsMap map[string][][]interface{}, wantedSheetNames
 			continue
 		}
 
-		fmt.Println("Scanning: ", name, " for data")
 		lastIds[name] = sheetsMap[name][len(sheetsMap[name]) - 1][0]
-		fmt.Println("Success: latest ID: ", lastIds[name])
 	}
 
-	fmt.Println("Id map: ", lastIds, "\n")
 	return lastIds
 }
 
@@ -366,29 +312,22 @@ func getDataFromDBTable(db *sql.DB, tableName string, IdOffset int) ([][]interfa
 					//checks if byte array as a string represents a number -> will convert if so
 					if intValue, err := strconv.ParseInt(strValue, 10, 64); err == nil {
 						row[i] = intValue
-						fmt.Println("Byte Array found to be Integer: ", row[i])
 					} else if floatValue, err := strconv.ParseFloat(strValue, 64); err == nil {
 						row[i] = floatValue
-						fmt.Println("Byte Array found to be Float: ", row[i])
 					} else {
 						row[i] = strValue
-						fmt.Println("Byte Array found to be String: ", row[i])
 					}
 
 					row[i] = string(value)
 					
 				case int64:
 					row[i] = strconv.FormatInt(value, 10)
-					fmt.Println("Integers found: ", row[i])
 				case float64:
 					row[i] = strconv.FormatFloat(value, 'f', -1, 64)
-					fmt.Println("Floats found: ", row[i])
 				case bool:
 					row[i] = strconv.FormatBool(value)
-					fmt.Println("Booleans found: ", row[i])
 				default:
 					row[i] = fmt.Sprintf("%v", value)
-					fmt.Println("Something else found: ", row[i])
 				}
 			}
 
@@ -404,8 +343,6 @@ func getDataFromDBTable(db *sql.DB, tableName string, IdOffset int) ([][]interfa
 		return nil, fmt.Errorf(tableName, "%q: %v", err)
 	}
 	
-	fmt.Println("Database data succesfully retrieved from: " + tableName)
-	fmt.Println(table)
 	return table, nil
 }
 
@@ -426,7 +363,65 @@ func convertInterfaceOfIdToIntString(intf interface{}) int {
 	}
 }
 
+//----------------------------------------//
+//--------Full Process Method ------------//
+//----------------------------------------//
 
+func uploadDB(srv *sheets.Service, db *sql.DB, GoogleSheet GoogleSheet, DB_1138scapp Database) {
+	//configure ranges
+	var ranges []string
+
+	for _, name := range GoogleSheet.Sheets {
+		ranges = append(ranges, name + "!2:9999")
+	}
+
+	//configure last Ids of each sheet
+	lastIds := getLastKeyFromSheets(
+		batchRead(srv, GoogleSheet.SpreadsheetId, ranges),
+		GoogleSheet.Sheets,
+	)
+
+	var GoogleSheetRequest []*sheets.ValueRange
+
+	//scans all tables from Database and adds them to a list of ValueRange pointers
+	//This is done to batch write and only use 1 API call fro everything
+	for _, name := range DB_1138scapp.TableNames {
+
+		var err error
+		IdOffset, valueExists := lastIds[name]
+
+		if !slices.Contains(GoogleSheet.Sheets, name) {
+			continue
+		}
+	
+		
+		//checks if the offset retrieved is an integer
+		//if so it will convert it to a string to be used as the offset
+		//else it will simply set the offset to be 0
+		//the 0 case will make it so that the sheet returns to normal after everything 
+		var table [][]interface{}
+
+		if valueExists {
+			table, err = getDataFromDBTable(db, name, convertInterfaceOfIdToIntString(IdOffset))
+		} else {
+			table, err = getDataFromDBTable(db, name, 0)
+		}
+
+		if err != nil {
+			fmt.Println("Issue with retrieving table: ", name, "%q: %v", err)
+			continue
+		}
+
+		writeRange := name + "!2:9999"
+
+		GoogleSheetRequest = append(GoogleSheetRequest, &sheets.ValueRange{
+			Range: writeRange,
+			Values: table,
+		})
+	}
+
+	batchWrite(srv, GoogleSheet.SpreadsheetId, GoogleSheetRequest)
+}
 
 //googlesheets -> credit card down but no charge
 //Use free cloud DB with limited rows
